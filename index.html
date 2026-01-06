@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Secure Code Analyzer - OWASP Top 10</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header -->
+      <header class="header">
+        <div class="header-content">
+          <h1>🔒 Secure Code Analyzer</h1>
+          <p>Professional Static Security Analysis for JavaScript & PHP</p>
+          <p class="subtitle">
+            OWASP Top 10 Compliance | Pattern-Based Detection
+          </p>
+        </div>
+      </header>
+
+      <!-- Main Content -->
+      <main class="main-content">
+        <!-- Upload Section -->
+        <section class="upload-section" id="uploadSection">
+          <div class="upload-card">
+            <div class="upload-icon">📁</div>
+            <h2>Upload Your Code</h2>
+            <p>Drag and drop your file here, or click to browse</p>
+            <input
+              type="file"
+              id="fileInput"
+              accept=".js,.jsx,.mjs,.ts,.tsx,.php,.phtml,.txt"
+              hidden
+            />
+            <button
+              class="upload-btn"
+              onclick="document.getElementById('fileInput').click()"
+            >
+              Choose File
+            </button>
+            <div class="file-info" id="fileInfo"></div>
+          </div>
+
+          <!-- Alternative: Code Input -->
+          <div class="code-input-section">
+            <h3>Or paste your code directly:</h3>
+            <div class="code-input-wrapper">
+              <select id="languageSelect">
+                <option value="javascript">JavaScript</option>
+                <option value="php">PHP</option>
+              </select>
+              <textarea
+                id="codeInput"
+                placeholder="Paste your code here..."
+              ></textarea>
+              <button class="analyze-btn" onclick="analyzeCodeText()">
+                Analyze Code
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Loading Section -->
+        <section
+          class="loading-section"
+          id="loadingSection"
+          style="display: none"
+        >
+          <div class="spinner"></div>
+          <p>Analyzing code for security vulnerabilities...</p>
+        </section>
+
+        <!-- Results Section -->
+        <section
+          class="results-section"
+          id="resultsSection"
+          style="display: none"
+        >
+          <!-- Summary Cards -->
+          <div class="summary-cards" id="summaryCards"></div>
+
+          <!-- Security Score -->
+          <div class="score-card" id="scoreCard"></div>
+
+          <!-- Action Buttons -->
+          <div class="action-buttons">
+            <button class="back-btn" onclick="resetAnalysis()">
+              ← Back to Upload
+            </button>
+            <div class="export-buttons">
+              <button class="export-btn" onclick="exportReport('json')">
+                📄 Export JSON
+              </button>
+              <button class="export-btn" onclick="exportReport('html')">
+                🌐 Export HTML
+              </button>
+              <button class="export-btn" onclick="exportReport('txt')">
+                📝 Export TXT
+              </button>
+            </div>
+          </div>
+
+          <!-- Vulnerabilities List -->
+          <div class="vulnerabilities-container">
+            <div class="vulnerabilities-header">
+              <h2>Detected Vulnerabilities</h2>
+              <div class="filters-container">
+                <div class="filter-group">
+                  <label>Filter by Severity:</label>
+                  <select
+                    id="severityFilter"
+                    class="filter-select"
+                    onchange="applyFilters()"
+                  >
+                    <option value="all">All</option>
+                    <option value="Critical">Critical</option>
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                  </select>
+                </div>
+                <div class="filter-group">
+                  <label>Filter by Category:</label>
+                  <select
+                    id="categoryFilter"
+                    class="filter-select"
+                    onchange="applyFilters()"
+                  >
+                    <option value="all">All</option>
+                  </select>
+                </div>
+                <button class="clear-filters-btn" onclick="clearFilters()">
+                  Clear Filters
+                </button>
+              </div>
+            </div>
+            <div class="vulnerabilities-list" id="vulnerabilitiesList"></div>
+          </div>
+        </section>
+
+        <!-- No Issues Section -->
+        <section
+          class="no-issues-section"
+          id="noIssuesSection"
+          style="display: none"
+        >
+          <div class="success-card">
+            <div class="success-icon">✅</div>
+            <h2>No Vulnerabilities Detected!</h2>
+            <p>
+              Your code appears to be secure. Great job following security best
+              practices!
+            </p>
+            <button class="back-btn" onclick="resetAnalysis()">
+              ← Analyze Another File
+            </button>
+          </div>
+        </section>
+      </main>
+
+      <!-- Footer -->
+      <footer class="footer">
+        <p>
+          Secure Code Analyzer | OWASP Top 10 Standards | Static Analysis Only
+        </p>
+      </footer>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
