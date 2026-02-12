@@ -57,7 +57,7 @@ Source Code → Pattern Matching → Vulnerability Detection → Scoring → Rep
 ┌─────────────────────────────────┐
 │   Analysis Engine               │
 │   - Line-by-line scanning       │
-│   - Pattern matching           │
+│   - Pattern matching            │
 │   - Context extraction          │
 └────────┬────────────────────────┘
          │

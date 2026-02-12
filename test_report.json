@@ -1,0 +1,185 @@
+{
+  "metadata": {
+    "generated_at": "2026-01-27T14:15:44.137201",
+    "total_vulnerabilities": 13,
+    "security_score": 48
+  },
+  "statistics": {
+    "total": 13,
+    "by_severity": {
+      "Critical": 1,
+      "High": 6,
+      "Medium": 6,
+      "Low": 0
+    },
+    "by_category": {
+      "Best Practice": 6,
+      "A03": 2,
+      "A02": 1,
+      "A05": 2,
+      "A10": 1,
+      "A07": 1
+    },
+    "by_file": {
+      "test_samples/vulnerable.php": 13
+    }
+  },
+  "vulnerabilities": [
+    {
+      "rule_id": "BP-PHP-001",
+      "rule_name": "Missing Input Validation",
+      "category": "Best Practice",
+      "severity": "Medium",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 5,
+      "code_snippet": "\n// A03: SQL Injection\n$userId = $_GET['id'];\n$query = \"SELECT * FROM users WHERE id = \" . $userId;\n$result = mysqli_query($conn, $query);",
+      "description": "Direct use of superglobals without validation",
+      "remediation": "Validate and sanitize all input using filter_input() or filter_var()",
+      "matched_pattern": "\\$_GET\\s*\\["
+    },
+    {
+      "rule_id": "A03-PHP-002",
+      "rule_name": "Cross-Site Scripting (XSS)",
+      "category": "A03",
+      "severity": "High",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 10,
+      "code_snippet": "\n// A03: XSS\necho $_GET['name'];\nprint $_POST['comment'];\n",
+      "description": "Unsanitized output of user input, vulnerable to XSS",
+      "remediation": "Use htmlspecialchars() or htmlentities() to escape output, implement Content Security Policy",
+      "matched_pattern": "echo\\s+\\$_[A-Z]+\\s*\\["
+    },
+    {
+      "rule_id": "BP-PHP-001",
+      "rule_name": "Missing Input Validation",
+      "category": "Best Practice",
+      "severity": "Medium",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 10,
+      "code_snippet": "\n// A03: XSS\necho $_GET['name'];\nprint $_POST['comment'];\n",
+      "description": "Direct use of superglobals without validation",
+      "remediation": "Validate and sanitize all input using filter_input() or filter_var()",
+      "matched_pattern": "\\$_GET\\s*\\["
+    },
+    {
+      "rule_id": "A03-PHP-002",
+      "rule_name": "Cross-Site Scripting (XSS)",
+      "category": "A03",
+      "severity": "High",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 11,
+      "code_snippet": "// A03: XSS\necho $_GET['name'];\nprint $_POST['comment'];\n\n// A02: Weak Password Hashing",
+      "description": "Unsanitized output of user input, vulnerable to XSS",
+      "remediation": "Use htmlspecialchars() or htmlentities() to escape output, implement Content Security Policy",
+      "matched_pattern": "print\\s+\\$_[A-Z]+\\s*\\["
+    },
+    {
+      "rule_id": "BP-PHP-001",
+      "rule_name": "Missing Input Validation",
+      "category": "Best Practice",
+      "severity": "Medium",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 11,
+      "code_snippet": "// A03: XSS\necho $_GET['name'];\nprint $_POST['comment'];\n\n// A02: Weak Password Hashing",
+      "description": "Direct use of superglobals without validation",
+      "remediation": "Validate and sanitize all input using filter_input() or filter_var()",
+      "matched_pattern": "\\$_POST\\s*\\["
+    },
+    {
+      "rule_id": "BP-PHP-001",
+      "rule_name": "Missing Input Validation",
+      "category": "Best Practice",
+      "severity": "Medium",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 14,
+      "code_snippet": "\n// A02: Weak Password Hashing\n$password = $_POST['password'];\n$hash = md5($password);\n",
+      "description": "Direct use of superglobals without validation",
+      "remediation": "Validate and sanitize all input using filter_input() or filter_var()",
+      "matched_pattern": "\\$_POST\\s*\\["
+    },
+    {
+      "rule_id": "A02-PHP-001",
+      "rule_name": "Weak Password Hashing",
+      "category": "A02",
+      "severity": "Critical",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 15,
+      "code_snippet": "// A02: Weak Password Hashing\n$password = $_POST['password'];\n$hash = md5($password);\n\n// A05: Hardcoded Secrets",
+      "description": "Use of weak cryptographic hash functions",
+      "remediation": "Use password_hash() with PASSWORD_BCRYPT or PASSWORD_ARGON2ID",
+      "matched_pattern": "md5\\s*\\("
+    },
+    {
+      "rule_id": "A05-PHP-001",
+      "rule_name": "Hardcoded Secrets",
+      "category": "A05",
+      "severity": "High",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 18,
+      "code_snippet": "\n// A05: Hardcoded Secrets\n$password = \"admin123\";\n$api_key = \"sk_live_1234567890abcdef\";\n",
+      "description": "Hardcoded credentials or secrets in source code",
+      "remediation": "Use environment variables or secure configuration files outside web root",
+      "matched_pattern": "\\$password\\s*=\\s*['\\\"][^'\\\"]+['\\\"]"
+    },
+    {
+      "rule_id": "A05-PHP-001",
+      "rule_name": "Hardcoded Secrets",
+      "category": "A05",
+      "severity": "High",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 19,
+      "code_snippet": "// A05: Hardcoded Secrets\n$password = \"admin123\";\n$api_key = \"sk_live_1234567890abcdef\";\n\n// A03: Command Injection",
+      "description": "Hardcoded credentials or secrets in source code",
+      "remediation": "Use environment variables or secure configuration files outside web root",
+      "matched_pattern": "\\$api_key\\s*=\\s*['\\\"][^'\\\"]+['\\\"]"
+    },
+    {
+      "rule_id": "BP-PHP-001",
+      "rule_name": "Missing Input Validation",
+      "category": "Best Practice",
+      "severity": "Medium",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 22,
+      "code_snippet": "\n// A03: Command Injection\n$filename = $_GET['file'];\nexec(\"cat \" . $filename);\n",
+      "description": "Direct use of superglobals without validation",
+      "remediation": "Validate and sanitize all input using filter_input() or filter_var()",
+      "matched_pattern": "\\$_GET\\s*\\["
+    },
+    {
+      "rule_id": "BP-PHP-001",
+      "rule_name": "Missing Input Validation",
+      "category": "Best Practice",
+      "severity": "Medium",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 26,
+      "code_snippet": "\n// A10: SSRF\n$url = $_GET['url'];\n$content = file_get_contents($url);\n",
+      "description": "Direct use of superglobals without validation",
+      "remediation": "Validate and sanitize all input using filter_input() or filter_var()",
+      "matched_pattern": "\\$_GET\\s*\\["
+    },
+    {
+      "rule_id": "A10-PHP-001",
+      "rule_name": "Server-Side Request Forgery",
+      "category": "A10",
+      "severity": "High",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 27,
+      "code_snippet": "// A10: SSRF\n$url = $_GET['url'];\n$content = file_get_contents($url);\n\n// A07: Weak Session Management",
+      "description": "File/URL access with user-controlled input, vulnerable to SSRF",
+      "remediation": "Validate URLs, whitelist allowed domains, block internal network access",
+      "matched_pattern": "file_get_contents\\s*\\(\\s*\\$"
+    },
+    {
+      "rule_id": "A07-PHP-001",
+      "rule_name": "Weak Session Management",
+      "category": "A07",
+      "severity": "High",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 30,
+      "code_snippet": "\n// A07: Weak Session Management\nsession_start();\n// Missing session security configuration\n",
+      "description": "Missing session security configuration",
+      "remediation": "Configure secure session settings: httpOnly, secure flag, SameSite attribute, regenerate session ID on login",
+      "matched_pattern": "session_start\\s*\\(\\s*\\)"
+    }
+  ]
+}
