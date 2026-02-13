@@ -1,27 +1,27 @@
 {
   "metadata": {
-    "generated_at": "2026-01-27T14:15:44.137201",
-    "total_vulnerabilities": 13,
-    "security_score": 48
+    "generated_at": "2026-02-13T09:41:00.120119",
+    "total_vulnerabilities": 14,
+    "security_score": 38
   },
   "statistics": {
-    "total": 13,
+    "total": 14,
     "by_severity": {
-      "Critical": 1,
+      "Critical": 2,
       "High": 6,
       "Medium": 6,
       "Low": 0
     },
     "by_category": {
       "Best Practice": 6,
-      "A03": 2,
+      "A03": 3,
       "A02": 1,
       "A05": 2,
       "A10": 1,
       "A07": 1
     },
     "by_file": {
-      "test_samples/vulnerable.php": 13
+      "test_samples/vulnerable.php": 14
     }
   },
   "vulnerabilities": [
@@ -36,6 +36,18 @@
       "description": "Direct use of superglobals without validation",
       "remediation": "Validate and sanitize all input using filter_input() or filter_var()",
       "matched_pattern": "\\$_GET\\s*\\["
+    },
+    {
+      "rule_id": "A03-PHP-001",
+      "rule_name": "SQL Injection Vulnerability",
+      "category": "A03",
+      "severity": "Critical",
+      "file_path": "test_samples/vulnerable.php",
+      "line_number": 6,
+      "code_snippet": "// A03: SQL Injection\n$userId = $_GET['id'];\n$query = \"SELECT * FROM users WHERE id = \" . $userId;\n$result = mysqli_query($conn, $query);\n",
+      "description": "SQL query with direct variable interpolation, vulnerable to injection",
+      "remediation": "Use prepared statements with mysqli_prepare() or PDO::prepare()",
+      "matched_pattern": "(SELECT|INSERT|UPDATE|DELETE)\\s+.*['\\\"].*\\s*\\.\\s*\\$[a-zA-Z_]"
     },
     {
       "rule_id": "A03-PHP-002",

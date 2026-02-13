@@ -4,4 +4,6 @@ Werkzeug==3.0.1
 rich==13.7.0
 google-generativeai==0.3.2
 requests==2.31.0
+reportlab==4.0.7
+weasyprint==60.2
 

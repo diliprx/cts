@@ -23,7 +23,7 @@ const config = {
   password: "admin123",
 };
 
-// A07: Weak Session Management
+// A07: Weak Session Managemen%t
 function storeToken(token) {
   localStorage.setItem("auth_token", token);
 }

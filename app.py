@@ -17,7 +17,7 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
-from analyzer_engine import CodeAnalyzer
+from analyzer_engine import CodeAnalyzer, AnalysisMode
 from report_generator import ReportGenerator
 
 # Gemini API Configuration
@@ -38,8 +38,16 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 
-analyzer = CodeAnalyzer()
-report_generator = ReportGenerator(analyzer)
+# Create analyzers for each mode (cached)
+analyzers = {
+    'taint': CodeAnalyzer(mode=AnalysisMode.TAINT),
+    'regex': CodeAnalyzer(mode=AnalysisMode.REGEX),
+    'hybrid': CodeAnalyzer(mode=AnalysisMode.HYBRID)
+}
+report_generators = {
+    mode: ReportGenerator(analyzer) 
+    for mode, analyzer in analyzers.items()
+}
 
 
 def allowed_file(filename):
@@ -96,6 +104,14 @@ def analyze_code():
         if not allowed_file(file.filename):
             return jsonify({'error': 'File type not allowed'}), 400
         
+        # Get analysis mode from request (default to taint)
+        mode = request.form.get('mode', 'taint').lower()
+        if mode not in ['taint', 'regex', 'hybrid']:
+            mode = 'taint'
+        
+        # Get the appropriate analyzer
+        analyzer = analyzers[mode]
+        
         # Save uploaded file temporarily
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -111,6 +127,7 @@ def analyze_code():
             response = {
                 'success': True,
                 'filename': filename,
+                'analysis_mode': mode,
                 'statistics': stats,
                 'security_score': score,
                 'vulnerabilities': [
@@ -152,6 +169,14 @@ def analyze_text():
         code = data['code']
         language = data.get('language', 'javascript')
         filename = data.get('filename', 'input.js')
+        mode = data.get('mode', 'taint').lower()
+        
+        # Validate mode
+        if mode not in ['taint', 'regex', 'hybrid']:
+            mode = 'taint'
+        
+        # Get the appropriate analyzer
+        analyzer = analyzers[mode]
         
         # Analyze the code
         vulnerabilities = analyzer.analyze_code_string(code, language, filename)
@@ -161,6 +186,7 @@ def analyze_text():
         response = {
             'success': True,
             'filename': filename,
+            'analysis_mode': mode,
             'statistics': stats,
             'security_score': score,
             'vulnerabilities': [
@@ -185,12 +211,149 @@ def analyze_text():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/analyze-github', methods=['POST'])
+def analyze_github():
+    """Analyze a GitHub repository"""
+    try:
+        data = request.get_json()
+        
+        if not data or 'repo_url' not in data:
+            return jsonify({'error': 'No repository URL provided'}), 400
+        
+        repo_url = data['repo_url']
+        mode = data.get('mode', 'taint').lower()
+        
+        # Validate mode
+        if mode not in ['taint', 'regex', 'hybrid']:
+            mode = 'taint'
+        
+        # Get the appropriate analyzer
+        analyzer = analyzers[mode]
+        
+        try:
+            # Clone and analyze repository
+            vulnerabilities, repo_path = analyzer.analyze_github_repo(repo_url)
+            stats = analyzer.get_statistics(vulnerabilities)
+            score = analyzer.calculate_security_score(vulnerabilities)
+            
+            response = {
+                'success': True,
+                'repo_url': repo_url,
+                'repo_path': repo_path,
+                'analysis_mode': mode,
+                'statistics': stats,
+                'security_score': score,
+                'total_vulnerabilities': len(vulnerabilities),
+                'vulnerabilities': [
+                    {
+                        'rule_id': v.rule_id,
+                        'rule_name': v.rule_name,
+                        'category': v.category,
+                        'severity': v.severity.value,
+                        'file_path': v.file_path,
+                        'line_number': v.line_number,
+                        'code_snippet': v.code_snippet,
+                        'description': v.description,
+                        'remediation': v.remediation
+                    }
+                    for v in vulnerabilities
+                ]
+            }
+            
+            return jsonify(response)
+        
+        finally:
+            # Cleanup cloned repository
+            analyzer.cleanup()
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/analyze-directory', methods=['POST'])
+def analyze_directory():
+    """Analyze uploaded directory (as zip file)"""
+    try:
+        import zipfile
+        
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.endswith('.zip'):
+            return jsonify({'error': 'Please upload a ZIP file'}), 400
+        
+        mode = request.form.get('mode', 'taint').lower()
+        if mode not in ['taint', 'regex', 'hybrid']:
+            mode = 'taint'
+        
+        analyzer = analyzers[mode]
+        
+        # Save and extract zip
+        temp_dir = tempfile.mkdtemp()
+        zip_path = os.path.join(temp_dir, 'upload.zip')
+        file.save(zip_path)
+        
+        extract_dir = os.path.join(temp_dir, 'extracted')
+        os.makedirs(extract_dir, exist_ok=True)
+        
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+            
+            # Analyze the extracted directory
+            vulnerabilities = analyzer.analyze_directory(extract_dir)
+            stats = analyzer.get_statistics(vulnerabilities)
+            score = analyzer.calculate_security_score(vulnerabilities)
+            
+            response = {
+                'success': True,
+                'filename': file.filename,
+                'analysis_mode': mode,
+                'statistics': stats,
+                'security_score': score,
+                'total_vulnerabilities': len(vulnerabilities),
+                'vulnerabilities': [
+                    {
+                        'rule_id': v.rule_id,
+                        'rule_name': v.rule_name,
+                        'category': v.category,
+                        'severity': v.severity.value,
+                        'file_path': v.file_path.replace(extract_dir, ''),  # Relative path
+                        'line_number': v.line_number,
+                        'code_snippet': v.code_snippet,
+                        'description': v.description,
+                        'remediation': v.remediation
+                    }
+                    for v in vulnerabilities
+                ]
+            }
+            
+            return jsonify(response)
+        
+        finally:
+            # Cleanup
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/report/json', methods=['POST'])
 def generate_json_report():
     """Generate and download JSON report"""
     try:
         data = request.get_json()
         vulnerabilities_data = data.get('vulnerabilities', [])
+        mode = data.get('mode', 'taint')
+        
+        # Get appropriate report generator
+        report_gen = report_generators.get(mode, report_generators['taint'])
         
         # Convert back to Vulnerability objects (simplified for API)
         # In production, you'd want to store session data or use a proper serialization
@@ -208,11 +371,11 @@ def generate_json_report():
                 code_snippet=v_data['code_snippet'],
                 description=v_data['description'],
                 remediation=v_data['remediation'],
-                matched_pattern=''
+                matched_pattern=v_data.get('matched_pattern', '')
             )
             vulnerabilities.append(vuln)
         
-        json_report = report_generator.generate_json(vulnerabilities)
+        json_report = report_gen.generate_json(vulnerabilities)
         
         # Create temporary file
         temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
@@ -236,6 +399,10 @@ def generate_html_report():
     try:
         data = request.get_json()
         vulnerabilities_data = data.get('vulnerabilities', [])
+        mode = data.get('mode', 'taint')
+        
+        # Get appropriate report generator
+        report_gen = report_generators.get(mode, report_generators['taint'])
         
         from analyzer_engine import Vulnerability, Severity
         
@@ -251,11 +418,11 @@ def generate_html_report():
                 code_snippet=v_data['code_snippet'],
                 description=v_data['description'],
                 remediation=v_data['remediation'],
-                matched_pattern=''
+                matched_pattern=v_data.get('matched_pattern', '')
             )
             vulnerabilities.append(vuln)
         
-        html_report = report_generator.generate_html(vulnerabilities)
+        html_report = report_gen.generate_html(vulnerabilities)
         
         # Create temporary file
         temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
@@ -279,6 +446,10 @@ def generate_txt_report():
     try:
         data = request.get_json()
         vulnerabilities_data = data.get('vulnerabilities', [])
+        mode = data.get('mode', 'taint')
+        
+        # Get appropriate report generator
+        report_gen = report_generators.get(mode, report_generators['taint'])
         
         from analyzer_engine import Vulnerability, Severity
         
@@ -294,11 +465,11 @@ def generate_txt_report():
                 code_snippet=v_data['code_snippet'],
                 description=v_data['description'],
                 remediation=v_data['remediation'],
-                matched_pattern=''
+                matched_pattern=v_data.get('matched_pattern', '')
             )
             vulnerabilities.append(vuln)
         
-        txt_report = report_generator.generate_txt(vulnerabilities)
+        txt_report = report_gen.generate_txt(vulnerabilities)
         
         # Create temporary file
         temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
@@ -310,6 +481,48 @@ def generate_txt_report():
             as_attachment=True,
             download_name='security_report.txt',
             mimetype='text/plain'
+        )
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/report/pdf', methods=['POST'])
+def generate_pdf_report():
+    """Generate and download PDF report"""
+    try:
+        data = request.get_json()
+        vulnerabilities_data = data.get('vulnerabilities', [])
+        mode = data.get('mode', 'taint')
+        
+        # Get appropriate report generator
+        report_gen = report_generators.get(mode, report_generators['taint'])
+        
+        from analyzer_engine import Vulnerability, Severity
+        
+        vulnerabilities = []
+        for v_data in vulnerabilities_data:
+            vuln = Vulnerability(
+                rule_id=v_data['rule_id'],
+                rule_name=v_data['rule_name'],
+                category=v_data['category'],
+                severity=Severity(v_data['severity']),
+                file_path=v_data['file_path'],
+                line_number=v_data['line_number'],
+                code_snippet=v_data['code_snippet'],
+                description=v_data['description'],
+                remediation=v_data['remediation'],
+                matched_pattern=v_data.get('matched_pattern', '')
+            )
+            vulnerabilities.append(vuln)
+        
+        pdf_path = report_gen.generate_pdf(vulnerabilities)
+        
+        return send_file(
+            pdf_path,
+            as_attachment=True,
+            download_name='security_report.pdf',
+            mimetype='application/pdf'
         )
     
     except Exception as e:

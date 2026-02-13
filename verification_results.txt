@@ -1,0 +1,14 @@
+Running Regex Tests:
+
+SQLi vulns: 2
+  - BP-PHP-001: Missing Input Validation (Line 2)
+  - A03-PHP-001: SQL Injection Vulnerability (Line 3)
+
+XSS vulns: 4
+  - A03-PHP-002: Cross-Site Scripting (XSS) (Line 2)
+  - BP-PHP-001: Missing Input Validation (Line 2)
+  - A03-PHP-002: Cross-Site Scripting (XSS) (Line 3)
+  - BP-PHP-001: Missing Input Validation (Line 3)
+
+Concatenation vulns: 1
+  - A03-PHP-001: SQL Injection Vulnerability (Line 1)

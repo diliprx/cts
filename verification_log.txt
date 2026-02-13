@@ -1,0 +1,19 @@
+Analyzing test_samples\vulnerable.php...
+
+Found 13 vulnerabilities:
+[1] Missing Input Validation (Medium) - \$_GET\s*\[
+[2] Cross-Site Scripting (XSS) (High) - echo\s+\$_[A-Z]+\s*\[
+[3] Missing Input Validation (Medium) - \$_GET\s*\[
+[4] Cross-Site Scripting (XSS) (High) - print\s+\$_[A-Z]+\s*\[
+[5] Missing Input Validation (Medium) - \$_POST\s*\[
+[6] Missing Input Validation (Medium) - \$_POST\s*\[
+[7] Weak Password Hashing (Critical) - md5\s*\(
+[8] Hardcoded Secrets (High) - \$password\s*=\s*['\"][^'\"]+['\"]
+[9] Hardcoded Secrets (High) - \$api_key\s*=\s*['\"][^'\"]+['\"]
+[10] Missing Input Validation (Medium) - \$_GET\s*\[
+[11] Missing Input Validation (Medium) - \$_GET\s*\[
+[12] Server-Side Request Forgery (High) - file_get_contents\s*\(\s*\$
+[13] Weak Session Management (High) - session_start\s*\(\s*\)
+
+SUCCESS: Regex fallback is working.
+INFO: No AST issues found (expected if tools are missing).

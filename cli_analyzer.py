@@ -20,24 +20,33 @@ except ImportError:
     print("Error: 'rich' library is required. Install it with: pip install rich")
     sys.exit(1)
 
-from analyzer_engine import CodeAnalyzer
+from analyzer_engine import CodeAnalyzer, AnalysisMode
 from report_generator import ReportGenerator
 
 
 class CLIAnalyzer:
     """Command-line interface for code analysis"""
     
-    def __init__(self):
+    def __init__(self, analysis_mode: AnalysisMode = AnalysisMode.TAINT):
         self.console = Console()
-        self.analyzer = CodeAnalyzer()
+        self.analyzer = CodeAnalyzer(mode=analysis_mode)
         self.report_generator = ReportGenerator(self.analyzer)
+        self.analysis_mode = analysis_mode
     
     def print_banner(self):
         """Print application banner"""
-        banner = """
+        mode_display = {
+            AnalysisMode.TAINT: "🔍 Taint Analysis (Data Flow Tracking)",
+            AnalysisMode.REGEX: "📋 Regex Patterns (Traditional Matching)",
+            AnalysisMode.HYBRID: "⚡ Hybrid Mode (Taint + Regex)"
+        }
+        mode_str = mode_display.get(self.analysis_mode, "Unknown Mode")
+        
+        banner = f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║         🔒 Secure Code Analyzer - OWASP Top 10              ║
 ║         Static Security Analysis for JS & PHP                ║
+║         Mode: {mode_str:45}║
 ╚══════════════════════════════════════════════════════════════╝
         """
         self.console.print(banner, style="bold cyan")
@@ -207,33 +216,52 @@ class CLIAnalyzer:
         if args.file:
             file_path = args.file
             if not os.path.exists(file_path):
-                self.console.print(f"[red]Error: File not found: {file_path}[/red]")
+                if args.format == 'json':
+                    import json
+                    print(json.dumps({"error": f"File not found: {file_path}"}))
+                else:
+                    self.console.print(f"[red]Error: File not found: {file_path}[/red]")
                 return
             
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=self.console
-            ) as progress:
-                task = progress.add_task("Analyzing...", total=None)
-                vulnerabilities = self.analyzer.analyze_file(file_path)
-                progress.update(task, completed=True)
-            
-            self.display_results(vulnerabilities, file_path)
-            
-            if args.output:
-                ext = os.path.splitext(args.output)[1].lower()
-                if ext == '.json':
-                    self.report_generator.generate_json(vulnerabilities, args.output)
-                elif ext == '.html':
-                    self.report_generator.generate_html(vulnerabilities, args.output)
-                elif ext == '.txt':
-                    self.report_generator.generate_txt(vulnerabilities, args.output)
-                else:
-                    self.console.print(f"[yellow]Unknown format, defaulting to JSON[/yellow]")
-                    self.report_generator.generate_json(vulnerabilities, args.output)
+            # Interactive/Rich mode
+            if args.format == 'text':
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=self.console
+                ) as progress:
+                    task = progress.add_task("Analyzing...", total=None)
+                    vulnerabilities = self.analyzer.analyze_file(file_path)
+                    progress.update(task, completed=True)
                 
-                self.console.print(f"[green]✓ Report saved to: {args.output}[/green]")
+                self.display_results(vulnerabilities, file_path)
+                
+                if args.output:
+                    # ... existing output logic ...
+                    ext = os.path.splitext(args.output)[1].lower()
+                    if ext == '.json':
+                        self.report_generator.generate_json(vulnerabilities, args.output)
+                    elif ext == '.html':
+                        self.report_generator.generate_html(vulnerabilities, args.output)
+                    elif ext == '.pdf':
+                        self.report_generator.generate_pdf(vulnerabilities, args.output)
+                    elif ext == '.txt':
+                        self.report_generator.generate_txt(vulnerabilities, args.output)
+                    else:
+                        self.console.print(f"[yellow]Unknown format, defaulting to JSON[/yellow]")
+                        self.report_generator.generate_json(vulnerabilities, args.output)
+                    
+                    self.console.print(f"[green]✓ Report saved to: {args.output}[/green]")
+            
+            # JSON mode (for extensions)
+            elif args.format == 'json':
+                # Force console to be quiet to avoid any rich output interfering with JSON
+                self.console.quiet = True
+                vulnerabilities = self.analyzer.analyze_file(file_path)
+                json_output = self.report_generator.generate_json(vulnerabilities)
+                # Print ONLY the raw JSON to stdout
+                sys.stdout.buffer.write(json_output.encode('utf-8'))
+                sys.stdout.flush()
         
         elif args.directory:
             dir_path = args.directory
@@ -258,6 +286,8 @@ class CLIAnalyzer:
                     self.report_generator.generate_json(vulnerabilities, args.output)
                 elif ext == '.html':
                     self.report_generator.generate_html(vulnerabilities, args.output)
+                elif ext == '.pdf':
+                    self.report_generator.generate_pdf(vulnerabilities, args.output)
                 elif ext == '.txt':
                     self.report_generator.generate_txt(vulnerabilities, args.output)
                 else:
@@ -265,25 +295,121 @@ class CLIAnalyzer:
                 
                 self.console.print(f"[green]✓ Report saved to: {args.output}[/green]")
         
+        elif args.github:
+            # GitHub repository analysis
+            repo_url = args.github
+            
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=self.console
+            ) as progress:
+                task = progress.add_task("Cloning repository...", total=None)
+                try:
+                    vulnerabilities, repo_path = self.analyzer.analyze_github_repo(repo_url)
+                    progress.update(task, completed=True)
+                except Exception as e:
+                    self.console.print(f"[red]Error: {str(e)}[/red]")
+                    return
+            
+            self.console.print(f"[green]✓ Repository cloned to: {repo_path}[/green]\n")
+            self.display_results(vulnerabilities, repo_url)
+            
+            if args.output:
+                ext = os.path.splitext(args.output)[1].lower()
+                if ext == '.json':
+                    self.report_generator.generate_json(vulnerabilities, args.output)
+                elif ext == '.html':
+                    self.report_generator.generate_html(vulnerabilities, args.output)
+                elif ext == '.pdf':
+                    self.report_generator.generate_pdf(vulnerabilities, args.output)
+                elif ext == '.txt':
+                    self.report_generator.generate_txt(vulnerabilities, args.output)
+                else:
+                    self.report_generator.generate_json(vulnerabilities, args.output)
+                
+                self.console.print(f"[green]✓ Report saved to: {args.output}[/green]")
+            
+            # Cleanup temp directory
+            self.analyzer.cleanup()
+        
         else:
             # Interactive mode
             self.print_banner()
-            self.console.print("\n[bold]Select Analysis Mode:[/bold]\n")
+            
+            # Ask user to select analysis mode
+            self.console.print("\n[bold] Select Analysis Mode:[/bold]\n")
+            self.console.print("1. 🔍 Taint Analysis (Data Flow Tracking) - [cyan]Recommended[/cyan]")
+            self.console.print("2. 📋 Regex Patterns (Traditional Matching)")
+            self.console.print("3. ⚡ Hybrid Mode (Both Taint + Regex)\n")
+            
+            mode_choice = self.console.input("[cyan]Enter mode choice (1-3, default=1): [/cyan]") or "1"
+            
+            mode_map = {
+                '1': AnalysisMode.TAINT,
+                '2': AnalysisMode.REGEX,
+                '3': AnalysisMode.HYBRID
+            }
+            
+            selected_mode = mode_map.get(mode_choice, AnalysisMode.TAINT)
+            
+            if selected_mode != self.analysis_mode:
+                # Recreate analyzer with new mode
+                self.analysis_mode = selected_mode
+                self.analyzer = CodeAnalyzer(mode=selected_mode)
+                self.report_generator = ReportGenerator(self.analyzer)
+                self.print_banner()
+            
+            self.console.print("\n[bold]Select Analysis Action:[/bold]\n")
             self.console.print("1. Analyze single file")
             self.console.print("2. Analyze directory")
-            self.console.print("3. Exit\n")
+            self.console.print("3. Analyze GitHub repository")
+            self.console.print("4. Exit\n")
             
-            choice = self.console.input("[cyan]Enter choice (1-3): [/cyan]")
+            choice = self.console.input("[cyan]Enter choice (1-4): [/cyan]")
             
             if choice == '1':
                 self.analyze_file_interactive()
             elif choice == '2':
                 self.analyze_directory_interactive()
             elif choice == '3':
+                self.analyze_github_interactive()
+            elif choice == '4':
                 self.console.print("[green]Goodbye![/green]")
                 return
             else:
                 self.console.print("[red]Invalid choice[/red]")
+    
+    def analyze_github_interactive(self):
+        """Interactive GitHub repository analysis"""
+        self.console.print("\n[bold]GitHub Repository Analysis Mode[/bold]\n")
+        
+        repo_url = self.console.input("[cyan]Enter GitHub repository URL: [/cyan]")
+        
+        if not repo_url:
+            self.console.print("[red]Error: Repository URL is required[/red]")
+            return
+        
+        # Clone and analyze
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console
+        ) as progress:
+            task = progress.add_task("Cloning repository...", total=None)
+            try:
+                vulnerabilities, repo_path = self.analyzer.analyze_github_repo(repo_url)
+                progress.update(task, completed=True)
+            except Exception as e:
+                self.console.print(f"[red]Error analyzing repository: {str(e)}[/red]")
+                return
+        
+        self.console.print(f"[green]✓ Repository cloned to: {repo_path}[/green]\n")
+        self.display_results(vulnerabilities, repo_url)
+        self.export_options(vulnerabilities)
+        
+        # Cleanup
+        self.analyzer.cleanup()
 
 
 def main():
@@ -300,13 +426,37 @@ def main():
         help='Directory to analyze'
     )
     parser.add_argument(
+        '-g', '--github',
+        help='GitHub repository URL to analyze'
+    )
+    parser.add_argument(
         '-o', '--output',
         help='Output file path for report'
+    )
+    parser.add_argument(
+        '--format',
+        choices=['text', 'json'],
+        default='text',
+        help='Output format (text=rich cli, json=raw json to stdout)'
+    )
+    parser.add_argument(
+        '-m', '--mode',
+        choices=['taint', 'regex', 'hybrid'],
+        default='taint',
+        help='Analysis mode: taint (data flow analysis), regex (pattern matching), hybrid (both)'
     )
     
     args = parser.parse_args()
     
-    cli = CLIAnalyzer()
+    # Map string mode to AnalysisMode enum
+    mode_map = {
+        'taint': AnalysisMode.TAINT,
+        'regex': AnalysisMode.REGEX,
+        'hybrid': AnalysisMode.HYBRID
+    }
+    analysis_mode = mode_map.get(args.mode, AnalysisMode.TAINT)
+    
+    cli = CLIAnalyzer(analysis_mode=analysis_mode)
     cli.run_cli(args)
 
 

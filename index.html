@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -27,6 +27,22 @@
             <div class="upload-icon">📁</div>
             <h2>Upload Your Code</h2>
             <p>Drag and drop your file here, or click to browse</p>
+
+            <!-- Analysis Mode Selection -->
+            <div class="mode-selection">
+              <label for="analysisMode">Analysis Mode:</label>
+              <select id="analysisMode" class="mode-select">
+                <option value="taint" selected>
+                  🔍 Taint Analysis (Data Flow) - Recommended
+                </option>
+                <option value="regex">📋 Regex Patterns (Traditional)</option>
+                <option value="hybrid">⚡ Hybrid (Taint + Regex)</option>
+              </select>
+              <p class="mode-description" id="modeDescription">
+                Tracks untrusted data flow from sources to dangerous sinks
+              </p>
+            </div>
+
             <input
               type="file"
               id="fileInput"
@@ -57,6 +73,47 @@
               <button class="analyze-btn" onclick="analyzeCodeText()">
                 Analyze Code
               </button>
+            </div>
+          </div>
+
+          <!-- GitHub Repository Analysis -->
+          <div class="github-section">
+            <h3>🐙 Analyze GitHub Repository:</h3>
+            <div class="github-input-wrapper">
+              <input
+                type="text"
+                id="githubUrl"
+                placeholder="https://github.com/username/repository"
+                class="github-input"
+              />
+              <button
+                class="analyze-btn github-btn"
+                onclick="analyzeGithubRepo()"
+              >
+                Analyze Repository
+              </button>
+            </div>
+            <p class="github-note">
+              Supports public GitHub repositories. The repository will be cloned
+              and analyzed for security vulnerabilities.
+            </p>
+          </div>
+
+          <!-- Folder/ZIP Upload -->
+          <div class="folder-section">
+            <h3>📂 Analyze Project Folder:</h3>
+            <div class="folder-input-wrapper">
+              <input type="file" id="folderInput" accept=".zip" hidden />
+              <button
+                class="upload-btn folder-btn"
+                onclick="document.getElementById('folderInput').click()"
+              >
+                Upload ZIP File
+              </button>
+              <p class="folder-note">
+                Upload a ZIP file containing your project files. All JS and PHP
+                files will be analyzed.
+              </p>
             </div>
           </div>
         </section>
@@ -94,6 +151,9 @@
               </button>
               <button class="export-btn" onclick="exportReport('html')">
                 🌐 Export HTML
+              </button>
+              <button class="export-btn pdf-btn" onclick="exportReport('pdf')">
+                📕 Export PDF
               </button>
               <button class="export-btn" onclick="exportReport('txt')">
                 📝 Export TXT

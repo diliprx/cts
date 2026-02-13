@@ -1,0 +1,59 @@
+{
+  "name": "secure-code-analyzer",
+  "displayName": "Secure Code Analyzer",
+  "description": "Real-time security analysis using local Python engine",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Linters",
+    "Security"
+  ],
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:php",
+    "onLanguage:python"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Secure Code Analyzer",
+      "properties": {
+        "secureCodeAnalyzer.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to python executable"
+        },
+        "secureCodeAnalyzer.scriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to cli_analyzer.py (leave empty to auto-detect if in workspace)"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "secureCodeAnalyzer.analyzeFile",
+        "title": "Secure Code Analyzer: Analyze Current File"
+      }
+    ]
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "pretest": "npm run lint",
+    "test": "node ./test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "20.2.5",
+    "eslint": "^8.41.0",
+    "glob": "^8.1.0",
+    "mocha": "^10.2.0",
+    "typescript": "^5.1.3",
+    "@vscode/test-electron": "^2.3.2"
+  }
+}

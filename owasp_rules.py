@@ -149,6 +149,7 @@ def get_owasp_rules() -> List[OWASPRule]:
             r"\$sql\s*=\s*['\"].*\$.*['\"]",
             r"SELECT.*\$.*FROM",
             r"INSERT.*\$.*INTO",
+            r"(SELECT|INSERT|UPDATE|DELETE)\s+.*['\"].*\s*\.\s*\$[a-zA-Z_]",  # Concatenation: "SELECT..." . $var
         ],
         description="SQL query with direct variable interpolation, vulnerable to injection",
         remediation="Use prepared statements with mysqli_prepare() or PDO::prepare()",
