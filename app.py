@@ -1,15 +1,12 @@
-"""
-Flask Web Application for Secure Code Analyzer
-REST API endpoints for file upload and analysis
-"""
-
 import os
+import json
 import tempfile
-from flask import Flask, request, jsonify, send_file, render_template_string
+import shutil
+from datetime import datetime
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-import json
-import requests
+import requests as http_requests
 
 try:
     import google.generativeai as genai
@@ -17,512 +14,624 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
-from analyzer_engine import CodeAnalyzer
+from analyzer_engine import CodeAnalyzer, Vulnerability, Severity, ALL_SUPPORTED_EXTENSIONS, DOCKERFILE_NAMES
 from report_generator import ReportGenerator
+from secret_detector import scan_content_for_secrets, scan_file_for_secrets, secret_findings_to_vulnerabilities
+from dependency_scanner import scan_manifest_file, dependency_findings_to_dicts, is_manifest_file, MANIFEST_FILES
 
-# Gemini API Configuration
-GEMINI_API_KEY = "AIzaSyBQiEu-m98MS50sbhoZqrokOuqVq4VEOwY"
-if GEMINI_AVAILABLE:
+# ── Gemini Configuration ──────────────────────────────────────────────────────
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBQiEu-m98MS50sbhoZqrokOuqVq4VEOwY")
+if GEMINI_AVAILABLE and GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    # Use v1 API instead of v1beta for standard API keys
-    import google.generativeai.types as genai_types
 
-app = Flask(__name__)
+# ── Flask App ─────────────────────────────────────────────────────────────────
+app = Flask(__name__, static_folder='frontend/dist', static_url_path='/')
 CORS(app)
 
-# Configuration
 UPLOAD_FOLDER = tempfile.gettempdir()
-ALLOWED_EXTENSIONS = {'js', 'jsx', 'mjs', 'ts', 'tsx', 'php', 'phtml', 'txt'}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB for ZIP files
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 
-analyzer = CodeAnalyzer()
+analyzer = CodeAnalyzer(enable_multi_line=True)
 report_generator = ReportGenerator(analyzer)
 
-
-def allowed_file(filename):
-    """Check if file extension is allowed"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+# Scan history file
+HISTORY_FILE = os.path.join(os.path.dirname(__file__), 'scan_history.json')
 
 
+def _load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+
+def _save_history(entry: dict):
+    history = _load_history()
+    history.insert(0, entry)
+    history = history[:50]  # Keep last 50 scans
+    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(history, f, indent=2)
+
+
+def _vuln_to_dict(v: Vulnerability) -> dict:
+    return {
+        'rule_id': v.rule_id, 'rule_name': v.rule_name,
+        'category': v.category,
+        'severity': v.severity.value if hasattr(v.severity, 'value') else str(v.severity),
+        'file_path': v.file_path, 'line_number': v.line_number,
+        'line_end': v.line_end, 'code_snippet': v.code_snippet,
+        'description': v.description, 'remediation': v.remediation,
+        'match_type': v.match_type,
+        'cwe': getattr(v, 'cwe', ''), 'owasp': getattr(v, 'owasp', ''),
+    }
+
+
+def _build_vuln_from_dict(v_data: dict) -> Vulnerability:
+    return Vulnerability(
+        rule_id=v_data['rule_id'], rule_name=v_data['rule_name'],
+        category=v_data['category'],
+        severity=Severity(v_data['severity']),
+        file_path=v_data['file_path'], line_number=v_data['line_number'],
+        line_end=v_data.get('line_end'),
+        code_snippet=v_data['code_snippet'], description=v_data['description'],
+        remediation=v_data['remediation'], matched_pattern='',
+        match_type=v_data.get('match_type', 'single-line'),
+        cwe=v_data.get('cwe', ''), owasp=v_data.get('owasp', ''),
+    )
+
+
+# ── Static / index ────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
-    """Serve the main HTML page"""
-    html_path = os.path.join(os.path.dirname(__file__), 'index.html')
     try:
-        with open(html_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError:
-        return "Error: index.html not found", 404
+        return app.send_static_file('index.html')
+    except Exception:
+        return jsonify({'error': 'Frontend not built. Run: cd frontend && npm run build'}), 404
 
 
-@app.route('/style.css')
-def style():
-    """Serve CSS file"""
-    css_path = os.path.join(os.path.dirname(__file__), 'style.css')
-    try:
-        with open(css_path, 'r', encoding='utf-8') as f:
-            return f.read(), 200, {'Content-Type': 'text/css'}
-    except FileNotFoundError:
-        return "Error: style.css not found", 404
+# ── Health ────────────────────────────────────────────────────────────────────
+@app.route('/api/health', methods=['GET'])
+def health():
+    return jsonify({
+        'status': 'healthy',
+        'service': 'Antigravity Secure Code Analysis Platform',
+        'version': '3.0',
+        'gemini_available': GEMINI_AVAILABLE,
+        'features': {
+            'multi_line_analysis': True,
+            'secret_detection': True,
+            'dependency_scanning': True,
+            'zip_upload': True,
+            'repo_scanning': True,
+            'languages_supported': 26,
+            'report_formats': ['json', 'html', 'txt', 'csv', 'markdown', 'pdf'],
+        }
+    })
 
 
-@app.route('/app.js')
-def app_js():
-    """Serve JavaScript file"""
-    js_path = os.path.join(os.path.dirname(__file__), 'app.js')
-    try:
-        with open(js_path, 'r', encoding='utf-8') as f:
-            return f.read(), 200, {'Content-Type': 'application/javascript'}
-    except FileNotFoundError:
-        return "Error: app.js not found", 404
-
-
+# ── Single File Analysis ──────────────────────────────────────────────────────
 @app.route('/api/analyze', methods=['POST'])
 def analyze_code():
-    """Analyze uploaded code file"""
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
-        
+
         file = request.files['file']
-        
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
-        
-        if not allowed_file(file.filename):
-            return jsonify({'error': 'File type not allowed'}), 400
-        
-        # Save uploaded file temporarily
+
+        enable_multi_line = request.form.get('enable_multi_line', 'true').lower() == 'true'
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        
+
         try:
-            # Analyze the file
+            analyzer.enable_multi_line = enable_multi_line
+            content = open(filepath, 'r', encoding='utf-8', errors='ignore').read()
+
+            # SAST analysis
             vulnerabilities = analyzer.analyze_file(filepath)
-            stats = analyzer.get_statistics(vulnerabilities)
+
+            # Secret detection
+            secret_findings = scan_file_for_secrets(filepath)
+            secret_dicts = secret_findings_to_vulnerabilities(secret_findings)
+            for sd in secret_dicts:
+                vulnerabilities.append(Vulnerability(
+                    rule_id=sd['rule_id'], rule_name=sd['rule_name'],
+                    category=sd['category'], severity=Severity(sd['severity']),
+                    file_path=sd['file_path'], line_number=sd['line_number'],
+                    code_snippet=sd['code_snippet'], description=sd['description'],
+                    remediation=sd['remediation'], matched_pattern='', match_type='secret',
+                ))
+
+            # Dependency scanning (if it's a manifest file)
+            if is_manifest_file(filename):
+                dep_findings = scan_manifest_file(filepath)
+                dep_dicts = dependency_findings_to_dicts(dep_findings)
+                for dd in dep_dicts:
+                    vulnerabilities.append(Vulnerability(
+                        rule_id=dd['rule_id'], rule_name=dd['rule_name'],
+                        category=dd['category'], severity=Severity(dd['severity']),
+                        file_path=dd['file_path'], line_number=dd['line_number'],
+                        code_snippet=dd['code_snippet'], description=dd['description'],
+                        remediation=dd['remediation'], matched_pattern='', match_type='dependency',
+                    ))
+
+            stats = analyzer.get_statistics(vulnerabilities, {'files_scanned': 1})
             score = analyzer.calculate_security_score(vulnerabilities)
-            
-            # Prepare response
-            response = {
-                'success': True,
-                'filename': filename,
-                'statistics': stats,
-                'security_score': score,
-                'vulnerabilities': [
-                    {
-                        'rule_id': v.rule_id,
-                        'rule_name': v.rule_name,
-                        'category': v.category,
-                        'severity': v.severity.value,
-                        'file_path': v.file_path,
-                        'line_number': v.line_number,
-                        'code_snippet': v.code_snippet,
-                        'description': v.description,
-                        'remediation': v.remediation
-                    }
-                    for v in vulnerabilities
-                ]
-            }
-            
-            return jsonify(response)
-        
+            grade = analyzer.get_security_grade(score)
+
+            vuln_list = [_vuln_to_dict(v) for v in vulnerabilities]
+
+            _save_history({
+                'id': datetime.now().strftime('%Y%m%d%H%M%S'),
+                'scan_type': 'single_file',
+                'source': filename,
+                'timestamp': datetime.now().isoformat(),
+                'total': len(vulnerabilities),
+                'score': score,
+                'grade': grade,
+                'critical': stats['by_severity']['Critical'],
+                'high': stats['by_severity']['High'],
+            })
+
+            return jsonify({
+                'success': True, 'filename': filename,
+                'statistics': stats, 'security_score': score, 'grade': grade,
+                'enable_multi_line': analyzer.enable_multi_line,
+                'vulnerabilities': vuln_list,
+            })
         finally:
-            # Clean up temporary file
             if os.path.exists(filepath):
                 os.remove(filepath)
-    
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/analyze-text', methods=['POST'])
-def analyze_text():
-    """Analyze code provided as text"""
+# ── Multi-File Upload ─────────────────────────────────────────────────────────
+@app.route('/api/analyze-multi', methods=['POST'])
+def analyze_multi():
+    try:
+        files = request.files.getlist('files')
+        if not files:
+            return jsonify({'error': 'No files provided'}), 400
+
+        all_vulns = []
+        file_list = []
+        tmp_dir = tempfile.mkdtemp()
+
+        try:
+            for file in files:
+                if file.filename == '':
+                    continue
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(tmp_dir, filename)
+                file.save(filepath)
+                file_list.append(filename)
+
+                # SAST
+                try:
+                    vulns = analyzer.analyze_file(filepath)
+                    all_vulns.extend(vulns)
+                except Exception:
+                    pass
+                # Secrets
+                secrets = scan_file_for_secrets(filepath)
+                for sd in secret_findings_to_vulnerabilities(secrets):
+                    all_vulns.append(Vulnerability(
+                        rule_id=sd['rule_id'], rule_name=sd['rule_name'],
+                        category=sd['category'], severity=Severity(sd['severity']),
+                        file_path=filename, line_number=sd['line_number'],
+                        code_snippet=sd['code_snippet'], description=sd['description'],
+                        remediation=sd['remediation'], matched_pattern='', match_type='secret',
+                    ))
+                # Dependencies
+                if is_manifest_file(filename):
+                    for dd in dependency_findings_to_dicts(scan_manifest_file(filepath)):
+                        all_vulns.append(Vulnerability(
+                            rule_id=dd['rule_id'], rule_name=dd['rule_name'],
+                            category=dd['category'], severity=Severity(dd['severity']),
+                            file_path=filename, line_number=dd['line_number'],
+                            code_snippet=dd['code_snippet'], description=dd['description'],
+                            remediation=dd['remediation'], matched_pattern='', match_type='dependency',
+                        ))
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        stats = analyzer.get_statistics(all_vulns, {'files_scanned': len(file_list)})
+        score = analyzer.calculate_security_score(all_vulns)
+        grade = analyzer.get_security_grade(score)
+
+        _save_history({
+            'id': datetime.now().strftime('%Y%m%d%H%M%S'),
+            'scan_type': 'multi_file',
+            'source': f"{len(file_list)} files",
+            'timestamp': datetime.now().isoformat(),
+            'total': len(all_vulns), 'score': score, 'grade': grade,
+            'critical': stats['by_severity']['Critical'],
+            'high': stats['by_severity']['High'],
+        })
+
+        return jsonify({
+            'success': True, 'files_scanned': file_list,
+            'statistics': stats, 'security_score': score, 'grade': grade,
+            'vulnerabilities': [_vuln_to_dict(v) for v in all_vulns],
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── ZIP Upload ────────────────────────────────────────────────────────────────
+@app.route('/api/analyze-zip', methods=['POST'])
+def analyze_zip():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        filename = secure_filename(file.filename)
+        tmp_path = os.path.join(tempfile.gettempdir(), filename)
+        file.save(tmp_path)
+
+        try:
+            vulns, file_list, extract_dir = analyzer.analyze_zip(tmp_path)
+
+            # Run secret detection and dep scanning on extracted files
+            for root, _, files in os.walk(extract_dir):
+                for f in files:
+                    fpath = os.path.join(root, f)
+                    rel = os.path.relpath(fpath, extract_dir)
+                    # Secrets
+                    for sd in secret_findings_to_vulnerabilities(scan_file_for_secrets(fpath)):
+                        sd['file_path'] = rel
+                        vulns.append(Vulnerability(
+                            rule_id=sd['rule_id'], rule_name=sd['rule_name'],
+                            category=sd['category'], severity=Severity(sd['severity']),
+                            file_path=rel, line_number=sd['line_number'],
+                            code_snippet=sd['code_snippet'], description=sd['description'],
+                            remediation=sd['remediation'], matched_pattern='', match_type='secret',
+                        ))
+                    # Deps
+                    if is_manifest_file(f):
+                        for dd in dependency_findings_to_dicts(scan_manifest_file(fpath)):
+                            dd['file_path'] = rel
+                            vulns.append(Vulnerability(
+                                rule_id=dd['rule_id'], rule_name=dd['rule_name'],
+                                category=dd['category'], severity=Severity(dd['severity']),
+                                file_path=rel, line_number=dd['line_number'],
+                                code_snippet=dd['code_snippet'], description=dd['description'],
+                                remediation=dd['remediation'], matched_pattern='', match_type='dependency',
+                            ))
+            shutil.rmtree(extract_dir, ignore_errors=True)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+        stats = analyzer.get_statistics(vulns, {'files_scanned': len(file_list)})
+        score = analyzer.calculate_security_score(vulns)
+        grade = analyzer.get_security_grade(score)
+
+        _save_history({
+            'id': datetime.now().strftime('%Y%m%d%H%M%S'),
+            'scan_type': 'zip',
+            'source': filename,
+            'timestamp': datetime.now().isoformat(),
+            'total': len(vulns), 'score': score, 'grade': grade,
+            'critical': stats['by_severity']['Critical'],
+            'high': stats['by_severity']['High'],
+        })
+
+        return jsonify({
+            'success': True, 'archive_name': filename,
+            'files_scanned': file_list, 'file_count': len(file_list),
+            'statistics': stats, 'security_score': score, 'grade': grade,
+            'vulnerabilities': [_vuln_to_dict(v) for v in vulns],
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── Repository Scan ───────────────────────────────────────────────────────────
+@app.route('/api/analyze-repo', methods=['POST'])
+def analyze_repo():
     try:
         data = request.get_json()
-        
-        if not data or 'code' not in data:
-            return jsonify({'error': 'No code provided'}), 400
-        
-        code = data['code']
-        language = data.get('language', 'javascript')
-        filename = data.get('filename', 'input.js')
-        
-        # Analyze the code
-        vulnerabilities = analyzer.analyze_code_string(code, language, filename)
-        stats = analyzer.get_statistics(vulnerabilities)
-        score = analyzer.calculate_security_score(vulnerabilities)
-        
-        response = {
-            'success': True,
-            'filename': filename,
-            'statistics': stats,
-            'security_score': score,
-            'vulnerabilities': [
-                {
-                    'rule_id': v.rule_id,
-                    'rule_name': v.rule_name,
-                    'category': v.category,
-                    'severity': v.severity.value,
-                    'file_path': v.file_path,
-                    'line_number': v.line_number,
-                    'code_snippet': v.code_snippet,
-                    'description': v.description,
-                    'remediation': v.remediation
-                }
-                for v in vulnerabilities
-            ]
-        }
-        
-        return jsonify(response)
-    
+        repo_url = (data or {}).get('url', '').strip()
+        if not repo_url:
+            return jsonify({'error': 'No repository URL provided'}), 400
+
+        # Basic URL validation
+        if not any(host in repo_url for host in ['github.com', 'gitlab.com', 'bitbucket.org']):
+            return jsonify({'error': 'Only GitHub, GitLab, and Bitbucket URLs are supported'}), 400
+
+        vulns, file_list, clone_dir = analyzer.analyze_repo(repo_url)
+
+        # Secret + dep scanning
+        for root, _, files in os.walk(clone_dir):
+            for f in files:
+                fpath = os.path.join(root, f)
+                rel = os.path.relpath(fpath, clone_dir)
+                for sd in secret_findings_to_vulnerabilities(scan_file_for_secrets(fpath)):
+                    vulns.append(Vulnerability(
+                        rule_id=sd['rule_id'], rule_name=sd['rule_name'],
+                        category=sd['category'], severity=Severity(sd['severity']),
+                        file_path=rel, line_number=sd['line_number'],
+                        code_snippet=sd['code_snippet'], description=sd['description'],
+                        remediation=sd['remediation'], matched_pattern='', match_type='secret',
+                    ))
+                if is_manifest_file(f):
+                    for dd in dependency_findings_to_dicts(scan_manifest_file(fpath)):
+                        vulns.append(Vulnerability(
+                            rule_id=dd['rule_id'], rule_name=dd['rule_name'],
+                            category=dd['category'], severity=Severity(dd['severity']),
+                            file_path=rel, line_number=dd['line_number'],
+                            code_snippet=dd['code_snippet'], description=dd['description'],
+                            remediation=dd['remediation'], matched_pattern='', match_type='dependency',
+                        ))
+        shutil.rmtree(clone_dir, ignore_errors=True)
+
+        stats = analyzer.get_statistics(vulns, {'files_scanned': len(file_list)})
+        score = analyzer.calculate_security_score(vulns)
+        grade = analyzer.get_security_grade(score)
+
+        _save_history({
+            'id': datetime.now().strftime('%Y%m%d%H%M%S'),
+            'scan_type': 'repository',
+            'source': repo_url,
+            'timestamp': datetime.now().isoformat(),
+            'total': len(vulns), 'score': score, 'grade': grade,
+            'critical': stats['by_severity']['Critical'],
+            'high': stats['by_severity']['High'],
+        })
+
+        return jsonify({
+            'success': True, 'repo_url': repo_url,
+            'files_scanned': file_list, 'file_count': len(file_list),
+            'statistics': stats, 'security_score': score, 'grade': grade,
+            'vulnerabilities': [_vuln_to_dict(v) for v in vulns],
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ── Text / Paste Analysis ─────────────────────────────────────────────────────
+@app.route('/api/analyze-text', methods=['POST'])
+def analyze_text():
+    try:
+        data = request.get_json()
+        if not data or 'code' not in data:
+            return jsonify({'error': 'No code provided'}), 400
+
+        code = data['code']
+        language = data.get('language', 'javascript')
+        filename = data.get('filename', f'input.{language}')
+        enable_multi_line = data.get('enable_multi_line', True)
+        analyzer.enable_multi_line = enable_multi_line
+
+        vulnerabilities = analyzer.analyze_code_string(code, language, filename)
+
+        # Secrets on pasted code
+        for sd in secret_findings_to_vulnerabilities(scan_content_for_secrets(code, filename)):
+            vulnerabilities.append(Vulnerability(
+                rule_id=sd['rule_id'], rule_name=sd['rule_name'],
+                category=sd['category'], severity=Severity(sd['severity']),
+                file_path=filename, line_number=sd['line_number'],
+                code_snippet=sd['code_snippet'], description=sd['description'],
+                remediation=sd['remediation'], matched_pattern='', match_type='secret',
+            ))
+
+        stats = analyzer.get_statistics(vulnerabilities, {'files_scanned': 1})
+        score = analyzer.calculate_security_score(vulnerabilities)
+        grade = analyzer.get_security_grade(score)
+
+        return jsonify({
+            'success': True, 'filename': filename,
+            'statistics': stats, 'security_score': score, 'grade': grade,
+            'vulnerabilities': [_vuln_to_dict(v) for v in vulnerabilities],
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── Scan History ──────────────────────────────────────────────────────────────
+@app.route('/api/scan-history', methods=['GET'])
+def scan_history():
+    return jsonify({'success': True, 'history': _load_history()})
+
+
+@app.route('/api/scan-history', methods=['DELETE'])
+def clear_history():
+    if os.path.exists(HISTORY_FILE):
+        os.remove(HISTORY_FILE)
+    return jsonify({'success': True, 'message': 'History cleared'})
+
+
+# ── Report Endpoints ──────────────────────────────────────────────────────────
+def _parse_vulns_from_request() -> list:
+    data = request.get_json()
+    return [_build_vuln_from_dict(v) for v in (data or {}).get('vulnerabilities', [])]
+
+
+def _send_temp_file(content, suffix, download_name, mimetype):
+    """Write content to a temp file and send it as a download attachment."""
+    import io
+    from flask import Response
+    if isinstance(content, str):
+        # Add BOM for CSV so Excel opens it correctly with UTF-8
+        if suffix == '.csv':
+            content = '\ufeff' + content
+        file_bytes = content.encode('utf-8')
+    else:
+        file_bytes = content
+    response = Response(
+        file_bytes,
+        status=200,
+        mimetype=mimetype,
+    )
+    response.headers['Content-Disposition'] = f'attachment; filename="{download_name}"'
+    response.headers['Content-Length'] = len(file_bytes)
+    response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition'
+    return response
 
 
 @app.route('/api/report/json', methods=['POST'])
-def generate_json_report():
-    """Generate and download JSON report"""
+def report_json():
     try:
-        data = request.get_json()
-        vulnerabilities_data = data.get('vulnerabilities', [])
-        
-        # Convert back to Vulnerability objects (simplified for API)
-        # In production, you'd want to store session data or use a proper serialization
-        from analyzer_engine import Vulnerability, Severity
-        
-        vulnerabilities = []
-        for v_data in vulnerabilities_data:
-            vuln = Vulnerability(
-                rule_id=v_data['rule_id'],
-                rule_name=v_data['rule_name'],
-                category=v_data['category'],
-                severity=Severity(v_data['severity']),
-                file_path=v_data['file_path'],
-                line_number=v_data['line_number'],
-                code_snippet=v_data['code_snippet'],
-                description=v_data['description'],
-                remediation=v_data['remediation'],
-                matched_pattern=''
-            )
-            vulnerabilities.append(vuln)
-        
-        json_report = report_generator.generate_json(vulnerabilities)
-        
-        # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-        temp_file.write(json_report)
-        temp_file.close()
-        
-        return send_file(
-            temp_file.name,
-            as_attachment=True,
-            download_name='security_report.json',
-            mimetype='application/json'
-        )
-    
+        vulns = _parse_vulns_from_request()
+        content = report_generator.generate_json(vulns)
+        return _send_temp_file(content, '.json', 'security_report.json', 'application/json')
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/report/html', methods=['POST'])
-def generate_html_report():
-    """Generate and download HTML report"""
+def report_html():
     try:
-        data = request.get_json()
-        vulnerabilities_data = data.get('vulnerabilities', [])
-        
-        from analyzer_engine import Vulnerability, Severity
-        
-        vulnerabilities = []
-        for v_data in vulnerabilities_data:
-            vuln = Vulnerability(
-                rule_id=v_data['rule_id'],
-                rule_name=v_data['rule_name'],
-                category=v_data['category'],
-                severity=Severity(v_data['severity']),
-                file_path=v_data['file_path'],
-                line_number=v_data['line_number'],
-                code_snippet=v_data['code_snippet'],
-                description=v_data['description'],
-                remediation=v_data['remediation'],
-                matched_pattern=''
-            )
-            vulnerabilities.append(vuln)
-        
-        html_report = report_generator.generate_html(vulnerabilities)
-        
-        # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
-        temp_file.write(html_report)
-        temp_file.close()
-        
-        return send_file(
-            temp_file.name,
-            as_attachment=True,
-            download_name='security_report.html',
-            mimetype='text/html'
-        )
-    
+        vulns = _parse_vulns_from_request()
+        content = report_generator.generate_html(vulns)
+        return _send_temp_file(content, '.html', 'security_report.html', 'text/html; charset=utf-8')
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/report/txt', methods=['POST'])
-def generate_txt_report():
-    """Generate and download TXT report"""
+def report_txt():
     try:
-        data = request.get_json()
-        vulnerabilities_data = data.get('vulnerabilities', [])
-        
-        from analyzer_engine import Vulnerability, Severity
-        
-        vulnerabilities = []
-        for v_data in vulnerabilities_data:
-            vuln = Vulnerability(
-                rule_id=v_data['rule_id'],
-                rule_name=v_data['rule_name'],
-                category=v_data['category'],
-                severity=Severity(v_data['severity']),
-                file_path=v_data['file_path'],
-                line_number=v_data['line_number'],
-                code_snippet=v_data['code_snippet'],
-                description=v_data['description'],
-                remediation=v_data['remediation'],
-                matched_pattern=''
-            )
-            vulnerabilities.append(vuln)
-        
-        txt_report = report_generator.generate_txt(vulnerabilities)
-        
-        # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
-        temp_file.write(txt_report)
-        temp_file.close()
-        
-        return send_file(
-            temp_file.name,
-            as_attachment=True,
-            download_name='security_report.txt',
-            mimetype='text/plain'
-        )
-    
+        vulns = _parse_vulns_from_request()
+        content = report_generator.generate_txt(vulns)
+        return _send_temp_file(content, '.txt', 'security_report.txt', 'text/plain; charset=utf-8')
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/report/csv', methods=['POST'])
+def report_csv():
+    try:
+        vulns = _parse_vulns_from_request()
+        content = report_generator.generate_csv(vulns)
+        return _send_temp_file(content, '.csv', 'security_report.csv', 'text/csv; charset=utf-8')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/report/markdown', methods=['POST'])
+def report_markdown():
+    try:
+        vulns = _parse_vulns_from_request()
+        content = report_generator.generate_markdown(vulns)
+        return _send_temp_file(content, '.md', 'security_report.md', 'text/plain; charset=utf-8')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/report/pdf', methods=['POST'])
+def report_pdf():
+    try:
+        vulns = _parse_vulns_from_request()
+        pdf_bytes = report_generator.generate_pdf(vulns)
+        from flask import Response
+        response = Response(
+            pdf_bytes,
+            status=200,
+            mimetype='application/pdf',
+        )
+        response.headers['Content-Disposition'] = 'attachment; filename="security_report.pdf"'
+        response.headers['Content-Length'] = len(pdf_bytes)
+        response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return response
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── AI Fix ────────────────────────────────────────────────────────────────────
 @app.route('/api/ai-fix', methods=['POST'])
 def ai_fix():
-    """Generate AI-corrected code using Gemini API"""
     try:
         if not GEMINI_AVAILABLE:
-            return jsonify({
-                'success': False,
-                'error': 'Google Generative AI library not installed. Run: pip install google-generativeai'
-            }), 500
-        
+            return jsonify({'success': False, 'error': 'google-generativeai not installed'}), 500
+
         data = request.get_json()
-        
         if not data:
             return jsonify({'success': False, 'error': 'No data provided'}), 400
-        
+
         code = data.get('code', '')
         description = data.get('description', '')
         remediation = data.get('remediation', '')
-        
+        language = data.get('language', 'javascript')
+
         if not code:
             return jsonify({'success': False, 'error': 'No code provided'}), 400
-        
-        # Create prompt for Gemini
-        prompt = f"""You are a security code reviewer. A vulnerability has been detected in the following code:
 
-VULNERABILITY DESCRIPTION:
-{description}
+        prompt = f"""You are an expert security code reviewer. A vulnerability has been detected:
 
-REMEDIATION GUIDANCE:
-{remediation}
+VULNERABILITY: {description}
+REMEDIATION GUIDANCE: {remediation}
 
-VULNERABLE CODE:
-```javascript
+VULNERABLE CODE ({language}):
+```{language}
 {code}
 ```
 
-Please provide a corrected, secure version of this code that fixes the vulnerability. 
-- Keep the same functionality
-- Follow security best practices
-- Include comments explaining the security improvements
-- Return ONLY the corrected code, no explanations outside the code comments
+Provide a corrected, secure version. Rules:
+- Same functionality, just secure
+- Add brief inline comments explaining the security fix
+- Return ONLY the corrected code, no extra explanations outside the code
 
 CORRECTED CODE:"""
-        
-        # Generate corrected code using Gemini
-        # For standard API, list available models and use the first compatible one
-        try:
-            # Get list of available models
-            available_models = []
+
+        model = None
+        for model_name in ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']:
             try:
-                for model in genai.list_models():
-                    if 'generateContent' in model.supported_generation_methods:
-                        model_name = model.name.replace('models/', '')
-                        available_models.append(model_name)
-            except Exception as list_error:
-                # If listing fails, try common model names
-                available_models = ['gemini-pro', 'gemini-1.5-flash', 'gemini-1.5-pro']
-            
-            # Try to use a model from available list
-            model = None
-            model_used = None
-            
-            # Try each available model
-            for model_name in available_models:
-                try:
-                    model = genai.GenerativeModel(model_name)
-                    model_used = model_name
-                    # Test with a simple generation to verify it works
-                    break
-                except Exception as model_error:
-                    continue
-            
-            # If still no model, try common names directly
-            if model is None:
-                common_models = ['gemini-pro', 'gemini-1.5-flash', 'gemini-1.5-pro']
-                for model_name in common_models:
-                    try:
-                        model = genai.GenerativeModel(model_name)
-                        model_used = model_name
-                        break
-                    except:
-                        continue
-            
-            # If SDK models don't work, try REST API directly
-            if model is None:
-                # Try REST API as fallback for standard API keys
-                try:
-                    rest_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
-                    rest_payload = {
-                        "contents": [{
-                            "parts": [{
-                                "text": prompt
-                            }]
-                        }]
-                    }
-                    rest_response = requests.post(rest_url, json=rest_payload, timeout=30)
-                    
-                    if rest_response.status_code == 200:
-                        rest_data = rest_response.json()
-                        if 'candidates' in rest_data and len(rest_data['candidates']) > 0:
-                            corrected_code = rest_data['candidates'][0]['content']['parts'][0]['text'].strip()
-                            
-                            # Clean up the response
-                            if corrected_code.startswith('```'):
-                                lines = corrected_code.split('\n')
-                                if lines[0].startswith('```'):
-                                    lines = lines[1:]
-                                if lines[-1].strip() == '```':
-                                    lines = lines[:-1]
-                                corrected_code = '\n'.join(lines)
-                            
-                            return jsonify({
-                                'success': True,
-                                'corrected_code': corrected_code
-                            })
-                    else:
-                        # If REST also fails, return error with available info
-                        return jsonify({
-                            'success': False,
-                            'error': f'REST API error ({rest_response.status_code}): {rest_response.text[:200]}'
-                        }), 500
-                except Exception as rest_error:
-                    return jsonify({
-                        'success': False,
-                        'error': f'No compatible Gemini model found via SDK or REST API. Error: {str(rest_error)}'
-                    }), 500
-            
-            response = model.generate_content(prompt)
-            
-            corrected_code = response.text.strip()
-            
-            # Clean up the response (remove markdown code blocks if present)
-            if corrected_code.startswith('```'):
-                lines = corrected_code.split('\n')
-                if lines[0].startswith('```'):
-                    lines = lines[1:]
-                if lines[-1].strip() == '```':
-                    lines = lines[:-1]
-                corrected_code = '\n'.join(lines)
-            
-            return jsonify({
-                'success': True,
-                'corrected_code': corrected_code
-            })
-        except Exception as api_error:
-            error_msg = str(api_error)
-            # Provide more specific error messages
-            if 'API_KEY' in error_msg or 'api_key' in error_msg.lower() or 'invalid' in error_msg.lower():
-                return jsonify({
-                    'success': False,
-                    'error': 'Invalid API key. Please check your Gemini API key configuration.'
-                }), 500
-            elif 'quota' in error_msg.lower() or 'rate limit' in error_msg.lower():
-                return jsonify({
-                    'success': False,
-                    'error': 'API quota exceeded. Please try again later.'
-                }), 500
+                model = genai.GenerativeModel(model_name)
+                break
+            except Exception:
+                continue
+
+        if not model:
+            # REST fallback
+            rest_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+            resp = http_requests.post(rest_url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=30)
+            if resp.status_code == 200:
+                corrected = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
             else:
-                return jsonify({
-                    'success': False,
-                    'error': f'Gemini API error: {error_msg}'
-                }), 500
-    
+                return jsonify({'success': False, 'error': 'No Gemini model available'}), 500
+        else:
+            response = model.generate_content(prompt)
+            corrected = response.text.strip()
+
+        # Strip code fences
+        if corrected.startswith('```'):
+            lines = corrected.split('\n')
+            if lines[0].startswith('```'):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]
+            corrected = '\n'.join(lines)
+
+        return jsonify({'success': True, 'corrected_code': corrected})
+
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f'Server error: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/debug/models', methods=['GET'])
-def debug_models():
-    """Debug endpoint to list available Gemini models"""
-    if not GEMINI_AVAILABLE:
-        return jsonify({'error': 'Gemini library not installed'}), 500
-    
-    try:
-        available_models = []
-        for model in genai.list_models():
-            model_info = {
-                'name': model.name,
-                'display_name': model.display_name,
-                'supported_methods': list(model.supported_generation_methods)
-            }
-            available_models.append(model_info)
-        
-        return jsonify({
-            'success': True,
-            'models': available_models
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@app.route('/api/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'service': 'Secure Code Analyzer',
-        'gemini_available': GEMINI_AVAILABLE
-    })
+# ── Rules Info ────────────────────────────────────────────────────────────────
+@app.route('/api/rules', methods=['GET'])
+def get_rules():
+    rules_info = [{
+        'id': rule.id, 'name': rule.name, 'category': rule.category,
+        'severity': rule.severity.value, 'languages': rule.languages,
+        'description': rule.description, 'remediation': rule.remediation,
+        'has_multi_line_patterns': len(rule.multi_line_patterns) > 0,
+    } for rule in analyzer.rules]
+    return jsonify({'success': True, 'total_rules': len(rules_info), 'rules': rules_info})
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
-
+    app.run(debug=False, host='0.0.0.0', port=5000)

@@ -1,0 +1,109 @@
+{
+  "name": "Custom Security Rules",
+  "version": "1.0",
+  "description": "Custom security rules that can be extended by users",
+  "rules": [
+    {
+      "id": "CUSTOM-SEC-001",
+      "name": "Hardcoded IP Address",
+      "category": "CUSTOM",
+      "severity": "Medium",
+      "patterns": [
+        "\\b(?:localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0)\\b"
+      ],
+      "description": "Hardcoded localhost or IP address - may indicate development code",
+      "remediation": "Use configuration files or environment variables for server addresses",
+      "languages": ["javascript", "php", "python"]
+    },
+    {
+      "id": "CUSTOM-SEC-002",
+      "name": "TODO/FIXME in Production Code",
+      "category": "CUSTOM",
+      "severity": "Low",
+      "patterns": [
+        "TODO\\b",
+        "FIXME\\b",
+        "HACK\\b",
+        "XXX\\b"
+      ],
+      "description": "Unresolved TODO, FIXME, or HACK comment found in code",
+      "remediation": "Address or remove TODO/FIXME/HACK comments before production deployment",
+      "languages": ["javascript", "php", "python"]
+    },
+    {
+      "id": "CUSTOM-SEC-003",
+      "name": "Weak Regex Pattern (ReDoS)",
+      "category": "CUSTOM",
+      "severity": "Medium",
+      "patterns": [
+        "\\.\\+",
+        "\\(\\..\\+\\)\\+",
+        "\\(\\[^\\]\\+\\]\\)\\+"
+      ],
+      "description": "Potentially vulnerable regex pattern that could cause ReDoS (Regular Expression Denial of Service)",
+      "remediation": "Review and optimize regex patterns to avoid catastrophic backtracking",
+      "languages": ["javascript", "php", "python"]
+    },
+    {
+      "id": "CUSTOM-DB-001",
+      "name": "Raw Database Query",
+      "category": "CUSTOM",
+      "severity": "High",
+      "patterns": [
+        "raw\\s*\\(",
+        "db\\.raw\\s*\\(",
+        "RawSQL\\s*\\("
+      ],
+      "multi_line_patterns": [
+        "raw\\s*\\(\\s*['\"`][\\s\\S]{0,200}?['\"`]"
+      ],
+      "description": "Raw SQL query execution detected - potential SQL injection risk",
+      "remediation": "Use ORM query builders or parameterized queries instead of raw SQL",
+      "languages": ["javascript", "php", "python"]
+    },
+    {
+      "id": "CUSTOM-AUTH-001",
+      "name": "Basic Authentication Detected",
+      "category": "CUSTOM",
+      "severity": "Medium",
+      "patterns": [
+        "Authorization:\\s*Basic\\s",
+        "\"Authorization\":\\s*\"Basic\\s"
+      ],
+      "description": "Basic authentication used - credentials sent in plaintext (base64 encoded)",
+      "remediation": "Use OAuth 2.0, JWT, or API keys with TLS instead of Basic Authentication",
+      "languages": ["javascript", "php", "python"]
+    },
+    {
+      "id": "CUSTOM-CRYPTO-001",
+      "name": "Weak Random Number Generator",
+      "category": "CUSTOM",
+      "severity": "High",
+      "patterns": [
+        "Math\\.random\\s*\\(",
+        "rand\\s*\\(",
+        "mt_rand\\s*\\(",
+        "random\\.randint\\s*\\(",
+        "random\\.choice\\s*\\("
+      ],
+      "description": "Use of weak random number generator for security-sensitive operations",
+      "remediation": "Use cryptographically secure random generators: crypto.randomBytes(), random_int(), secrets module",
+      "languages": ["javascript", "php", "python"]
+    },
+    {
+      "id": "CUSTOM-LOG-001",
+      "name": "Print/echo Debug Statement",
+      "category": "CUSTOM",
+      "severity": "Low",
+      "patterns": [
+        "console\\.log\\s*\\(",
+        "print\\s*\\([^)]*\\)",
+        "var_dump\\s*\\(",
+        "print_r\\s*\\("
+      ],
+      "description": "Debug print statement found - may leak information in production",
+      "remediation": "Remove debug statements before production deployment or use proper logging",
+      "languages": ["javascript", "php", "python"]
+    }
+  ]
+}

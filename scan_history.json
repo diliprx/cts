@@ -1,0 +1,35 @@
+[
+  {
+    "id": "20260707200830",
+    "scan_type": "multi_file",
+    "source": "2 files",
+    "timestamp": "2026-07-07T20:08:30.356008",
+    "total": 0,
+    "score": 100.0,
+    "grade": "A+",
+    "critical": 0,
+    "high": 0
+  },
+  {
+    "id": "20260707200549",
+    "scan_type": "repository",
+    "source": "https://github.com/Commando-X/vuln-bank",
+    "timestamp": "2026-07-07T20:05:49.482155",
+    "total": 334,
+    "score": 0,
+    "grade": "F",
+    "critical": 71,
+    "high": 238
+  },
+  {
+    "id": "20260707200252",
+    "scan_type": "single_file",
+    "source": "vul.py",
+    "timestamp": "2026-07-07T20:02:52.536188",
+    "total": 44,
+    "score": 0,
+    "grade": "F",
+    "critical": 4,
+    "high": 27
+  }
+]
