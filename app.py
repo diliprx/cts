@@ -7,6 +7,9 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import requests as http_requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     import google.generativeai as genai
