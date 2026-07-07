@@ -1,5 +1,16 @@
 [
   {
+    "id": "20260707201149",
+    "scan_type": "repository",
+    "source": "https://github.com/OWASP/wrongsecrets",
+    "timestamp": "2026-07-07T20:11:49.489981",
+    "total": 187,
+    "score": 0,
+    "grade": "F",
+    "critical": 14,
+    "high": 89
+  },
+  {
     "id": "20260707200830",
     "scan_type": "multi_file",
     "source": "2 files",
