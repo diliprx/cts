@@ -1,42 +1,9 @@
 [
   {
-    "id": "20260707201149",
-    "scan_type": "repository",
-    "source": "https://github.com/OWASP/wrongsecrets",
-    "timestamp": "2026-07-07T20:11:49.489981",
-    "total": 187,
-    "score": 0,
-    "grade": "F",
-    "critical": 14,
-    "high": 89
-  },
-  {
-    "id": "20260707200830",
-    "scan_type": "multi_file",
-    "source": "2 files",
-    "timestamp": "2026-07-07T20:08:30.356008",
-    "total": 0,
-    "score": 100.0,
-    "grade": "A+",
-    "critical": 0,
-    "high": 0
-  },
-  {
-    "id": "20260707200549",
-    "scan_type": "repository",
-    "source": "https://github.com/Commando-X/vuln-bank",
-    "timestamp": "2026-07-07T20:05:49.482155",
-    "total": 334,
-    "score": 0,
-    "grade": "F",
-    "critical": 71,
-    "high": 238
-  },
-  {
-    "id": "20260707200252",
+    "id": "20260707202831",
     "scan_type": "single_file",
     "source": "vul.py",
-    "timestamp": "2026-07-07T20:02:52.536188",
+    "timestamp": "2026-07-07T20:28:31.117748",
     "total": 44,
     "score": 0,
     "grade": "F",

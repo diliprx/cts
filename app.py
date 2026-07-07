@@ -20,7 +20,7 @@ from secret_detector import scan_content_for_secrets, scan_file_for_secrets, sec
 from dependency_scanner import scan_manifest_file, dependency_findings_to_dicts, is_manifest_file, MANIFEST_FILES
 
 # ── Gemini Configuration ──────────────────────────────────────────────────────
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBQiEu-m98MS50sbhoZqrokOuqVq4VEOwY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 if GEMINI_AVAILABLE and GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 

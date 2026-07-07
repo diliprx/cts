@@ -164,6 +164,46 @@ Higher scores indicate better security posture.
 | `/api/scan-history` | GET/DELETE | View/clear scan history |
 | `/api/rules` | GET | List all active rules |
 
+## Deployment (Render)
+
+Deploy for free on [Render](https://render.com) with auto-deploy on every git push.
+
+### Steps
+
+1. Push this project to a **GitHub** repository.
+
+2. On [Render Dashboard](https://dashboard.render.com), click **New + → Web Service**.
+
+3. Connect your GitHub repo.
+
+4. Use these settings:
+
+   | Setting | Value |
+   |---------|-------|
+   | **Runtime** | `Python` |
+   | **Build Command** | `pip install -r requirements.txt && cd frontend && npm install && npm run build && cd ..` |
+   | **Start Command** | `python app.py` |
+   | **Plan** | Free |
+
+5. Add an environment variable (optional, for AI fixes):
+
+   | Key | Value |
+   |-----|-------|
+   | `GEMINI_API_KEY` | your Gemini API key |
+
+6. Click **Deploy**.
+
+### Auto-Updates
+
+Every time you push to GitHub, Render will:
+1. Pull the latest code
+2. Run the build command (installs Python deps + builds frontend)
+3. Restart the server
+
+Your deployed link always reflects the latest changes.
+
+---
+
 ## Limitations
 
 ⚠️ **Important Notes:**
